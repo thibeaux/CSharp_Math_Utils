@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.Intrinsics.X86;
 using System.Text;
 using System.Threading.Tasks;
 
@@ -98,6 +99,43 @@ namespace Math_Utils
             }
         }
 
+        private double _MAPE_error { get; set; } = 0;
+        public double MAPE_Error
+        {
+            get
+            {
+                return _MAPE_error;
+            }
+            //set
+            //{
+            //    _MAPE_error = value;
+            //}
+        }
+        private double _MAD_error { get; set; } = 0;
+        public double MAD_Error
+        {
+            get
+            {
+                return _MAD_error;
+            }
+            //set
+            //{
+            //    _MAD_error = value; 
+            //}
+        }
+        private double _MSE_error { get; set; } = 0;
+        public double MSE_Error
+        {
+            get
+            {
+                return _MSE_error;
+            }
+            //set
+            //{
+            //    _MSE_error = value; 
+            //}
+        }
+
         /// <summary>
         /// Default constructor
         /// </summary>
@@ -160,6 +198,52 @@ namespace Math_Utils
             return new Formula<double>(slope, offset);
         }
         /// <summary>
+        /// After calculating the linear regression components, we can optionally call this method to test
+        /// the accuracy of this calulation. 
+        /// </summary>
+        /// <param name="actual"></param>
+        /// <param name="forecast"></param>
+        /// <param name="CalculateX">If true, then we will test the X component for accuracy, if false we will test the Y component, Y this is default. </param>
+        /// <exception cref="ArgumentException"></exception>
+        private void FindError(XYPair<double>[] actual, XYPair<double>[] forecast,bool CalculateX = false)
+        {
+            double absoluteDeviation = 0;
+            double sumAbsoluteDeviations = 0;
+            double sumAbsolutePercentage = 0;
+            double sumMeanSquare = 0;
+            if (actual.Length != forecast.Length)
+            {
+                throw new ArgumentException("The actual and forecast arrays must have the same length.");
+            }
+            if (!CalculateX)
+            {
+                for (int i = 0; i < actual.Length; i++)
+                {
+                    // Mean Absolute Deviation (MAD)
+                    absoluteDeviation = Math.Abs(actual[i].Y - forecast[i].Y);
+                    sumAbsoluteDeviations += absoluteDeviation;
+                    //Mean Absolute Percentage Error (MAPE)
+                    sumAbsolutePercentage = Math.Abs((actual[i].Y - forecast[i].Y) / (actual[i].Y));
+                }
+            }
+            else
+            {
+                for (int i = 0; i < actual.Length; i++)
+                {
+                    // Mean Absolute Deviation (MAD)
+                    absoluteDeviation = Math.Abs(actual[i].X - forecast[i].X);
+                    sumAbsoluteDeviations += absoluteDeviation;
+                    //Mean Absolute Percentage Error (MAPE)
+                    sumAbsolutePercentage = Math.Abs((actual[i].X - forecast[i].X) / (actual[i].X));
+                }
+            }
+            // Mean square error(MSE)
+            sumMeanSquare = absoluteDeviation * absoluteDeviation;
+            _MAD_error = sumAbsoluteDeviations / actual.Length;
+            _MAPE_error = ((sumAbsolutePercentage / forecast.Length) * 100);
+            _MSE_error = ((sumAbsolutePercentage / forecast.Length));
+        }
+        /// <summary>
         /// You give it the y value you want to find a corresponding x value for and the samples of x,y pairs that you have in a buffer. 
         /// We will then calculate a linear regression line based on your samples using the least squares regression line formula.
         /// 
@@ -167,12 +251,31 @@ namespace Math_Utils
         /// </summary>
         /// <param name="samples"></param>
         /// <param name="y"></param>
+        /// <param name="calculateError">Default to false, if true, then, based on your provided samples, we will genereate a test and genereate your error states.</param>
         /// <returns>x coordinate position</returns>
-        public double FindXPosition(XYPair<double>[] samples, double y)
+        public double FindXPosition(XYPair<double>[] samples, double y, bool calculateError=false, bool enableErrorCorrection = false)
         {
             double x = 0;
             Formula<double> result = CalculateLinearRegression(samples);
-            x = (y-result.Offset) /(result.Slope);
+
+            if(calculateError) 
+            {
+                XYPair<double>[] forecast = new XYPair<double>[samples.Length];
+                int i = 0;
+                foreach (XYPair<double> sample in samples)
+                {
+                    // create forecast list
+                    x = (sample.Y - result.Offset) / (result.Slope);
+                    forecast[i] = new XYPair<double>(x, sample.Y);
+                    i++;
+                }
+
+                FindError(samples, forecast,true); // true refers to us wanting to genereate test and it's results using the X attribute
+            }
+            double error = 0;
+            if (enableErrorCorrection)
+                error = this.MSE_Error;
+            x = (y-result.Offset+error) /(result.Slope);
             return x;
         }
         /// <summary>
@@ -183,14 +286,271 @@ namespace Math_Utils
         /// </summary>
         /// <param name="samples"></param>
         /// <param name="x"></param>
+        /// <param name="calculateError">Default to false, if true, then, based on your provided samples, we will genereate a test and genereate your error states.</param>
         /// <returns>y coordinate position</returns>
-        public double FindYPosition(XYPair<double>[] samples, double x)
+        public double FindYPosition(XYPair<double>[] samples, double x, bool calculateError = false, bool enableErrorCorrection = false)
         {
             double y = 0;
             Formula<double> result = CalculateLinearRegression(samples);
-            y = (result.Slope * x) + result.Offset; // y=mx+b
+
+            if (calculateError)
+            {
+                XYPair<double>[] forecast = new XYPair<double>[samples.Length];
+                int i = 0;
+                foreach (XYPair<double> sample in samples)
+                {
+                    // create forecast list
+                    y = (result.Slope * sample.X) + result.Offset;
+                    forecast[i] = new XYPair<double>(sample.X, y);
+                    i++;
+                }
+
+                FindError(samples, forecast);
+            }
+            double error = 0;
+            if (enableErrorCorrection)
+                error = this.MSE_Error;
+            y = (result.Slope * x) + result.Offset + error; // y=mx+b
             return y;
         }
 
+    }
+
+    /// <summary>
+    /// Represents a buffer for storing and managing data points of type T.
+    /// </summary>
+    /// <typeparam name="T">Type of data points in the buffer.</typeparam>
+    internal class SampleBuffer<T>
+    {
+        private List<T> _buffer;
+        private int _maxBufferSize;
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="SampleBuffer{T}"/> class with a specified maximum buffer size.
+        /// </summary>
+        /// <param name="maxBufferSize">The maximum size of the buffer.</param>
+        public SampleBuffer(int maxBufferSize)
+        {
+            if (maxBufferSize <= 0)
+            {
+                throw new ArgumentException("Maximum buffer size must be greater than zero.", nameof(maxBufferSize));
+            }
+
+            _buffer = new List<T>();
+            _maxBufferSize = maxBufferSize;
+        }
+
+        /// <summary>
+        /// Gets a value indicating whether the buffer is full.
+        /// </summary>
+        public bool IsBufferFull
+        {
+            get { return _buffer.Count == _maxBufferSize; }
+        }
+
+        /// <summary>
+        /// Adds a data point to the buffer.
+        /// </summary>
+        /// <param name="dataPoint">The data point to add.</param>
+        public void AddDataPoint(T dataPoint)
+        {
+            if (IsBufferFull)
+            {
+                throw new InvalidOperationException("Buffer is full. Cannot add more data points.");
+            }
+
+            _buffer.Add(dataPoint);
+        }
+
+        /// <summary>
+        /// Clears the last data point from the buffer.
+        /// </summary>
+        /// <returns>The removed data point.</returns>
+        /// <exception cref="InvalidOperationException">Thrown when the buffer is empty.</exception>
+        public T ClearDataPoint()
+        {
+            if (_buffer.Count == 0)
+            {
+                throw new InvalidOperationException("Buffer is empty. Cannot clear data point.");
+            }
+
+            T removedDataPoint = _buffer[_buffer.Count - 1];
+            _buffer.RemoveAt(_buffer.Count - 1);
+
+            return removedDataPoint;
+        }
+        /// <summary>
+        /// Clears all data points from the buffer.
+        /// </summary>
+        public void ClearAll()
+        {
+            _buffer.Clear();
+        }
+        /// <summary>
+        /// Gets the buffer as an array.
+        /// </summary>
+        /// <returns>The buffer as an array.</returns>
+        public T[] GetBufferAsArray()
+        {
+            return _buffer.ToArray();
+        }
+    }
+
+    /// <summary>
+    /// This class encapsulates the functionality for detecting outliers in a dataset using the standard deviation method.
+    /// </summary>
+    public class OutlierDetector
+    {
+        /// <summary>
+        /// An array of double values representing the dataset.
+        /// </summary>
+        private double[] _data { get;set; }
+        public double[] Data
+        {
+            get { return _data; }
+            private set{_data = value;}
+        }
+        /// <summary>
+        /// The mean (average) of the dataset.
+        /// </summary>
+        private double _mean { get; set; }
+        public double Mean
+        {
+            get
+            {
+                return _mean;
+            }
+            private set
+            {
+                _mean = value;
+            }
+        }
+        /// <summary>
+        /// The standard deviation of the dataset.
+        /// </summary>
+        private double _standardDeviation { get; set; }
+        public double StandardDeviation {
+            get { return _standardDeviation; } 
+            private set { _standardDeviation= value; } 
+        }
+        /// <summary>
+        /// A multiplier determining the threshold for identifying outliers.
+        /// </summary>
+        private double _threshold;
+        public double Threshold {
+            get { return _threshold; } 
+            private set { _threshold = value; }
+        }   
+
+        /// <summary>
+        /// Constructor that initializes the class with the dataset and an optional threshold.
+        /// </summary>
+        /// <param name="data">An array of double values representing the dataset.</param>
+        /// <param name="threshold">An optional multiplier determining the threshold for identifying outliers.</param>
+        public OutlierDetector(double[] data, double threshold = 2.0)
+        {
+            _data = data;
+            _threshold = threshold;
+            CalculateStatistics();
+        }
+        /// <summary>
+        /// Returns a new list containing the data without outliers, where each data point is within the specified threshold of the mean.
+        /// </summary>
+        /// <returns>A list containing the data without outliers.</returns>
+        public List<double> GetDataWithoutOutliers()
+        {
+            return _data.Where(value => Math.Abs(value - _mean) <= _threshold * _standardDeviation).ToList();
+        }
+        /// <summary>
+        /// Detects and returns a list of outliers in the dataset based on the specified threshold.
+        /// </summary>
+        /// <returns>A list of double values representing the outliers in the dataset.</returns>
+        public List<double> DetectOutliers()
+        {
+            return _data.Where(value => Math.Abs(value - _mean) > _threshold * _standardDeviation).ToList();
+        }
+
+        /// <summary>
+        /// Calculates the mean and standard deviation of the dataset.
+        /// </summary>
+        private void CalculateStatistics()
+        {
+            _mean = _data.Average();
+            _standardDeviation = CalculateStandardDeviation();
+        }
+
+        /// <summary>
+        /// Calculates the standard deviation of the dataset.
+        /// </summary>
+        /// <returns>The standard deviation of the dataset.</returns>
+        private double CalculateStandardDeviation()
+        {
+            double sumSquaredDifferences = _data.Sum(value => Math.Pow(value - _mean, 2));
+            return Math.Sqrt(sumSquaredDifferences / _data.Length);
+        }
+    }
+
+
+    /// <summary>
+    /// Represents an outlier detector for a specific type T using x, y pairs.
+    /// </summary>
+    /// <typeparam name="T">The type of values for x and y in the x, y pair.</typeparam>
+    internal class XYOutlierDetector<T>
+    {
+        private SampleBuffer<XYPair<T>> _sampleBuffer;
+        private Func<XYPair<T>, double> _valueExtractor;
+        // Expose _mean and _standardDeviation with public getter properties
+        public double Mean { get; private set; }
+        public double StandardDeviation { get; private set; }
+
+        private double _threshold;
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="OutlierDetector{T}"/> class.
+        /// </summary>
+        /// <param name="sampleBuffer">The sample buffer containing x, y pairs.</param>
+        /// <param name="valueExtractor">A function to extract numerical values from x, y pairs.</param>
+        /// <param name="threshold">The threshold for identifying outliers.</param>
+        public XYOutlierDetector(SampleBuffer<XYPair<T>> sampleBuffer, Func<XYPair<T>, double> valueExtractor, double threshold = 2.0)
+        {
+            _sampleBuffer = sampleBuffer ?? throw new ArgumentNullException(nameof(sampleBuffer));
+            _valueExtractor = valueExtractor ?? throw new ArgumentNullException(nameof(valueExtractor));
+            _threshold = threshold;
+            CalculateStatistics();
+        }
+        /// <summary>
+        /// Detects outliers in the sample buffer based on the specified threshold.
+        /// </summary>
+        /// <returns>A list of numerical values representing outliers.</returns>
+        public XYPair<T>[] DetectOutliers()
+        {
+            return _sampleBuffer.GetBufferAsArray()
+                .Where(pair => Math.Abs(_valueExtractor(pair) - Mean) > _threshold * StandardDeviation)
+                .ToArray();
+        }
+
+        /// <summary>
+        /// Returns a new array containing the data without outliers, where each data point is within the specified threshold of the mean.
+        /// </summary>
+        /// <returns>An array containing the data without outliers.</returns>
+        public XYPair<T>[] GetDataWithoutOutliers()
+        {
+            return _sampleBuffer.GetBufferAsArray()
+                .Where(pair => Math.Abs(_valueExtractor(pair) - Mean) <= _threshold * StandardDeviation)
+                .ToArray();
+        }
+
+        private void CalculateStatistics()
+        {
+            double[] data = _sampleBuffer.GetBufferAsArray().Select(_valueExtractor).ToArray();
+            Mean = data.Average();
+            StandardDeviation = CalculateStandardDeviation(data);
+        }
+
+        private double CalculateStandardDeviation(double[] values)
+        {
+            double sumSquaredDifferences = values.Sum(value => Math.Pow(value - Mean, 2));
+            return Math.Sqrt(sumSquaredDifferences / values.Length);
+        }
     }
 }
